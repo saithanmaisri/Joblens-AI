@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.db
+*.sqlite3
+
+# Secrets and environment variables
+.env
+.env.*
+!.env.example
+!.env.example.*
+!.env.sample
+
+# Node.js
+node_modules/
+dist/
+.next/
+out/
+coverage/
+npm-debug.log*
+
+# Build and generated files
+build/
+*.log
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
