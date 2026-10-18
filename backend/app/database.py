@@ -1,11 +1,16 @@
 """Database configuration for local SQLite or a hosted PostgreSQL database."""
 import os
+from pathlib import Path
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./joblens.db")
+DEFAULT_DATABASE_PATH = Path(__file__).resolve().parent.parent / "joblens.db"
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}",
+)
 # Some hosting platforms still provide the older postgres:// scheme.
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL.removeprefix("postgres://")
