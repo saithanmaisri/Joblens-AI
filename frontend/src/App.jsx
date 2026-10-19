@@ -373,7 +373,7 @@ async function removeJob(id) {
         <a className="nav-item" href="#job-library"><span>▤</span> Job library</a>
         <a className="nav-item" href="#applications"><span>✓</span> Applications</a>
         <div className="sidebar-bottom">
-          <div className="connection"><span className={`connection-dot ${apiReady ? 'online' : ''}`} /><div><b>{apiReady ? 'API connected' : 'API offline'}</b><small>{apiReady ? 'Local development' : 'Start backend server'}</small></div></div>
+          <div className="connection"><span className={`connection-dot ${apiReady ? 'online' : ''}`} /><div><b>{apiReady ? 'API connected' : 'API offline'}</b><small>{apiReady ? 'Production API' : 'Start backend server'}</small></div></div>
           <div className="sidebar-tip"><span className="tip-star">✳</span><b>Build with intention</b><p>Use the match report to identify learning goals—not to define your potential.</p></div>
         </div>
       </aside>
