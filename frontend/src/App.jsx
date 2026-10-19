@@ -4,7 +4,15 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').
 const STATUSES = ['Saved', 'Applied', 'Assessment', 'Interview', 'Offer', 'Rejected']
 
 async function api(path, options = {}) {
-  const headers = { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...options.headers }
+  const headers = {
+    ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+    ...options.headers,
+  }
+  const token = sessionStorage.getItem('joblens_access_token')
+  if (token && !path.startsWith('/api/auth/')) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers })
   if (!response.ok) {
     let message = `Request failed (${response.status})`
@@ -12,7 +20,15 @@ async function api(path, options = {}) {
       const body = await response.json()
       message = body.detail || message
     } catch { /* keep fallback */ }
-    throw new Error(message)
+
+    const error = new Error(message)
+    error.status = response.status
+
+    if (response.status === 401 && !path.startsWith('/api/auth/')) {
+      sessionStorage.removeItem('joblens_access_token')
+      window.dispatchEvent(new Event('joblens:unauthorized'))
+    }
+    throw error
   }
   if (response.status === 204) return null
   return response.json()
@@ -30,11 +46,11 @@ export default function App() {
   const [profileText, setProfileText] = useState('')
   const [profileSource, setProfileSource] = useState('')
   const [profileSaved, setProfileSaved] = useState(false)
-  const [jobTitle, setJobTitle] = useState('Data Analyst')
+  const [jobTitle, setJobTitle] = useState('')
   const [company, setCompany] = useState('')
-  const [location, setLocation] = useState('Hyderabad')
+  const [location, setLocation] = useState('')
   const [jobDescription, setJobDescription] = useState('')
-  const [requiredSkills, setRequiredSkills] = useState('Python, SQL, Excel, Power BI')
+  const [requiredSkills, setRequiredSkills] = useState('')
   const [jobUrl, setJobUrl] = useState('')
   const [match, setMatch] = useState(null)
   const [jobs, setJobs] = useState([])
@@ -42,12 +58,19 @@ export default function App() {
   const [analytics, setAnalytics] = useState({ total_jobs: 0, total_applications: 0, status_counts: {} })
   const [appTitle, setAppTitle] = useState('')
   const [appCompany, setAppCompany] = useState('')
-  const [appStatus, setAppStatus] = useState('Applied')
+  const [appStatus, setAppStatus] = useState('Saved')
   const [appUrl, setAppUrl] = useState('')
   const [appNotes, setAppNotes] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState({ kind: '', text: '' })
   const [apiReady, setApiReady] = useState(false)
+  const [token, setToken] = useState(() => sessionStorage.getItem('joblens_access_token') || '')
+  const [authMode, setAuthMode] = useState('login')
+  const [authName, setAuthName] = useState('')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
+  const [authError, setAuthError] = useState('')
 
   const refreshData = useCallback(async () => {
     try {
@@ -65,11 +88,36 @@ export default function App() {
       setApiReady(true)
     } catch (error) {
       setApiReady(false)
-      setNotice({ kind: 'error', text: `Backend not connected. Start FastAPI on port 8000. ${error.message}` })
+      if (error.status === 401) {
+        setAuthError('Your session expired. Please log in again.')
+        sessionStorage.removeItem('joblens_access_token')
+        setToken('')
+      } else {
+        setNotice({
+          kind: 'error',
+          text: `Could not reach the backend at ${API_BASE}. ${error.message}`,
+        })
+      }
     }
   }, [])
 
-  useEffect(() => { refreshData() }, [refreshData])
+  useEffect(() => {
+    if (token) {
+      refreshData()
+    } else {
+      setApiReady(false)
+    }
+  }, [token, refreshData])
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setAuthError('Your session expired. Please log in again.')
+      setToken('')
+      setApiReady(false)
+    }
+    window.addEventListener('joblens:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('joblens:unauthorized', handleUnauthorized)
+  }, [])
 
   const topStatus = useMemo(() => Object.entries(analytics.status_counts || {}).sort((a, b) => b[1] - a[1]).find(([, count]) => count > 0)?.[0] || 'No activity yet', [analytics])
 
@@ -176,6 +224,134 @@ async function removeJob(id) {
     catch (error) { setNotice({ kind: 'error', text: error.message }) }
   }
 
+  async function submitAuth(event) {
+    event.preventDefault()
+    setAuthBusy(true)
+    setAuthError('')
+
+    try {
+      const isSignup = authMode === 'signup'
+      const payload = isSignup
+        ? { name: authName.trim(), email: authEmail.trim(), password: authPassword }
+        : { email: authEmail.trim(), password: authPassword }
+
+      const result = await api(
+        isSignup ? '/api/auth/signup' : '/api/auth/login',
+        { method: 'POST', body: JSON.stringify(payload) },
+      )
+
+      sessionStorage.setItem('joblens_access_token', result.access_token)
+      setToken(result.access_token)
+      setAuthPassword('')
+      setAuthName('')
+      setAuthError('')
+    } catch (error) {
+      setAuthError(error.message || 'Authentication failed. Please try again.')
+    } finally {
+      setAuthBusy(false)
+    }
+  }
+
+  function logout() {
+    sessionStorage.removeItem('joblens_access_token')
+    setToken('')
+    setAuthPassword('')
+    setAuthError('')
+    setProfileText('')
+    setProfileSource('')
+    setProfileSaved(false)
+    setJobs([])
+    setApplications([])
+    setMatch(null)
+    setAnalytics({ total_jobs: 0, total_applications: 0, status_counts: {} })
+    setNotice({ kind: '', text: '' })
+  }
+
+  if (!token) {
+    return (
+      <main className="auth-screen">
+        <section className="auth-card">
+          <div className="brand auth-brand">
+            <span className="brand-mark">J</span>
+            <span>joblens<span className="brand-ai">.ai</span></span>
+          </div>
+          <span className="eyebrow">CAREER INTELLIGENCE WORKSPACE</span>
+          <h1>{authMode === 'signup' ? 'Create your account' : 'Welcome back'}</h1>
+          <p className="auth-description">
+            {authMode === 'signup'
+              ? 'Create an account to manage your profile, job matches, and applications.'
+              : 'Log in to continue your job search with your saved profile and opportunities.'}
+          </p>
+
+          <form className="auth-form" onSubmit={submitAuth}>
+            {authMode === 'signup' && (
+              <div className="field">
+                <label htmlFor="auth-name">Full name</label>
+                <input
+                  id="auth-name"
+                  value={authName}
+                  onChange={(event) => setAuthName(event.target.value)}
+                  minLength={2}
+                  maxLength={100}
+                  autoComplete="name"
+                  required
+                />
+              </div>
+            )}
+            <div className="field">
+              <label htmlFor="auth-email">Email address</label>
+              <input
+                id="auth-email"
+                type="email"
+                value={authEmail}
+                onChange={(event) => setAuthEmail(event.target.value)}
+                autoComplete="email"
+                required
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="auth-password">Password</label>
+              <input
+                id="auth-password"
+                type="password"
+                value={authPassword}
+                onChange={(event) => setAuthPassword(event.target.value)}
+                minLength={authMode === 'signup' ? 8 : 1}
+                maxLength={128}
+                autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                required
+              />
+              {authMode === 'signup' && (
+                <small className="auth-hint">Use at least 8 characters.</small>
+              )}
+            </div>
+
+            {authError && <p className="auth-error" role="alert">{authError}</p>}
+
+            <button className="button button-primary auth-submit" type="submit" disabled={authBusy}>
+              {authBusy ? 'Please wait…' : authMode === 'signup' ? 'Create account' : 'Log in'}
+            </button>
+          </form>
+
+          <p className="auth-switch">
+            {authMode === 'signup' ? 'Already have an account?' : 'New to JobLens AI?'}
+            {' '}
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode(authMode === 'signup' ? 'login' : 'signup')
+                setAuthError('')
+              }}
+            >
+              {authMode === 'signup' ? 'Log in' : 'Create account'}
+            </button>
+          </p>
+          <p className="auth-footnote">Your session token stays in this browser tab's session storage.</p>
+        </section>
+      </main>
+    )
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -192,7 +368,7 @@ async function removeJob(id) {
       </aside>
 
       <main className="main-content" id="overview">
-        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> Overview</div><div className="topbar-right"><span className="date-label">CAREER INTELLIGENCE</span><span className="avatar">ST</span></div></header>
+        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> Overview</div><div className="topbar-right"><span className="date-label">CAREER INTELLIGENCE</span><span className="avatar">ST</span><button className="logout-button" onClick={logout}>Log out</button></div></header>
         <section className="hero"><div><div className="hero-kicker"><span className="pulse" /> YOUR CAREER, WITH CLARITY</div><h1>Make your next move<br /><em>more intentional.</em></h1><p>Understand role fit, find your skill gaps, and keep your job search organized in one workspace.</p></div><div className="hero-art" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="art-center">J<span>✳</span></div><div className="floating-tag tag-one">SKILL SIGNALS</div><div className="floating-tag tag-two">ROLE INSIGHTS</div><div className="art-dot dot-one" /><div className="art-dot dot-two" /></div></section>
 
         {notice.text && <div className={`notice ${notice.kind}`} role="status"><span>{notice.kind === 'error' ? '!' : '✓'}</span><p>{notice.text}</p><button onClick={() => setNotice({ kind: '', text: '' })} aria-label="Dismiss notice">×</button></div>}
