@@ -8,7 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-
+from .email_validation import validate_email_address
 from .database import Base, engine, get_db
 from .matcher import calculate_match
 from .models import Application, CandidateProfile, Job, User
@@ -22,7 +22,8 @@ from .schemas import (
     AnalyzeRequest, AnalyzeResponse, AnalyticsOut,
     ApplicationCreate, ApplicationOut, ApplicationUpdate,
     AuthResponse, JobCreate, JobOut, LoginRequest,
-    ProfileOut, ProfileUpdate, SignupRequest, UserOut,
+    MessageResponse, ProfileOut, ProfileUpdate,
+    SignupRequest, UserOut,
 )
 
 security = HTTPBearer(auto_error=False)
@@ -81,48 +82,77 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "joblens-ai"}
 
 
-@app.post("/api/auth/signup", response_model=AuthResponse, status_code=201)
+
+@app.post("/api/auth/signup", response_model=MessageResponse, status_code=201)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     name = payload.name.strip()
     email = payload.email.strip().lower()
 
     if len(name) < 2:
-        raise HTTPException(status_code=422, detail="Name must contain at least 2 characters.")
+        raise HTTPException(
+            status_code=422,
+            detail="Name must contain at least 2 characters.",
+        )
 
-    existing_user = db.scalar(
-        select(User).where(User.email == email)
-    )
+    existing_user = db.scalar(select(User).where(User.email == email))
     if existing_user:
-        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+        raise HTTPException(
+            status_code=409,
+            detail="An account with this email already exists.",
+        )
+
+    # Validate the email without sending a verification email.
+    try:
+        result = validate_email_address(email)
+    except RuntimeError:
+        raise HTTPException(
+            status_code=503,
+            detail="Email validation is temporarily unavailable. Please try again.",
+        )
+
+    status = str(result.get("status", "")).lower()
+
+    if status == "invalid":
+        raise HTTPException(
+            status_code=422,
+            detail="Please enter a valid email address.",
+        )
+
+    if status != "valid":
+        raise HTTPException(
+            status_code=503,
+            detail="We couldn't confirm this email address. Please try again.",
+        )
 
     user = User(
         name=name,
         email=email,
         password_hash=hash_password(payload.password),
+        email_verified=True,
+        email_verification_token_hash=None,
+        email_verification_expires_at=None,
     )
     db.add(user)
 
     try:
         db.commit()
-        db.refresh(user)
     except Exception:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Could not create your account.")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not create your account.",
+        )
 
-    token = create_access_token(user.id)
-    return AuthResponse(
-        access_token=token,
-        user=UserOut(id=user.id, name=user.name, email=user.email),
+    return MessageResponse(
+        message="Account created successfully. You can now log in."
     )
+
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
-
-    user = db.scalar(
-        select(User).where(User.email == email)
-    )
+    user = db.scalar(select(User).where(User.email == email))
 
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(

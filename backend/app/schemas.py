@@ -115,3 +115,9 @@ class AnalyticsOut(BaseModel):
     total_jobs: int
     total_applications: int
     status_counts: dict[str, int]
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+

@@ -71,6 +71,7 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState('')
+  const [authMessage, setAuthMessage] = useState('')
 
   const refreshData = useCallback(async () => {
     try {
@@ -108,6 +109,7 @@ export default function App() {
       setApiReady(false)
     }
   }, [token, refreshData])
+
 
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -240,10 +242,16 @@ async function removeJob(id) {
         { method: 'POST', body: JSON.stringify(payload) },
       )
 
-      sessionStorage.setItem('joblens_access_token', result.access_token)
-      setToken(result.access_token)
-      setAuthPassword('')
-      setAuthName('')
+      if (isSignup) {
+        setAuthMessage(result.message || 'Account created successfully. You can now log in.')        
+        setAuthPassword('')
+        setAuthName('')
+        setAuthMode('login')
+      } else {
+        sessionStorage.setItem('joblens_access_token', result.access_token)
+        setToken(result.access_token)
+        setAuthPassword('')
+      }
       setAuthError('')
     } catch (error) {
       setAuthError(error.message || 'Authentication failed. Please try again.')
@@ -327,6 +335,8 @@ async function removeJob(id) {
             </div>
 
             {authError && <p className="auth-error" role="alert">{authError}</p>}
+            {authMessage && <p className="auth-message" role="status">{authMessage}</p>}
+
 
             <button className="button button-primary auth-submit" type="submit" disabled={authBusy}>
               {authBusy ? 'Please wait…' : authMode === 'signup' ? 'Create account' : 'Log in'}
@@ -341,6 +351,7 @@ async function removeJob(id) {
               onClick={() => {
                 setAuthMode(authMode === 'signup' ? 'login' : 'signup')
                 setAuthError('')
+                setAuthMessage('')
               }}
             >
               {authMode === 'signup' ? 'Log in' : 'Create account'}
